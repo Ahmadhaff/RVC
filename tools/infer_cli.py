@@ -46,17 +46,17 @@ def arg_parse() -> tuple:
 def main():
     load_dotenv()
     args = arg_parse()
-    
+
     # Validate input file exists
     if not os.path.exists(args.input_path):
         print(f"Error: Input file does not exist: {args.input_path}")
         sys.exit(1)
-    
+
     # Validate required arguments
     if not args.model_name:
         print("Error: --model_name is required")
         sys.exit(1)
-    
+
     config = Config()
     # Force CPU mode on macOS to avoid MPS crashes
     if config.device == "mps":
@@ -67,7 +67,7 @@ def main():
     config.is_half = args.is_half if args.is_half else config.is_half
     vc = VC(config)
     vc.get_vc(args.model_name)
-    
+
     info, wav_opt = vc.vc_single(
         0,
         args.input_path,
@@ -82,20 +82,20 @@ def main():
         args.rms_mix_rate,
         args.protect,
     )
-    
+
     # Check if conversion was successful
     if wav_opt is None or len(wav_opt) != 2:
         print(f"Conversion failed: {info}")
         sys.exit(1)
-    
+
     if "Success" not in info:
         print(f"Warning: {info}")
-    
+
     # Create output directory if it doesn't exist
     output_dir = os.path.dirname(args.opt_path)
     if output_dir and not os.path.exists(output_dir):
         os.makedirs(output_dir, exist_ok=True)
-    
+
     wavfile.write(args.opt_path, wav_opt[0], wav_opt[1])
     print(f"✓ Successfully saved converted audio to: {args.opt_path}")
     print(f"Info: {info}")

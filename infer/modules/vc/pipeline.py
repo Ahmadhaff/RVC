@@ -311,11 +311,13 @@ class Pipeline(object):
                 except:
                     pass  # Keep original if resolution fails
             # Also check if relative path needs to be made absolute
-            if not os.path.isabs(index_path_to_check) and not os.path.exists(index_path_to_check):
+            if not os.path.isabs(index_path_to_check) and not os.path.exists(
+                index_path_to_check
+            ):
                 abs_path = os.path.abspath(index_path_to_check)
                 if os.path.exists(abs_path):
                     index_path_to_check = abs_path
-        
+
         if (
             file_index != ""
             # and file_big_npy != ""

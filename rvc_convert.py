@@ -21,6 +21,7 @@ from infer.modules.vc.modules import VC
 
 load_dotenv()
 
+
 def convert_voice(
     input_path,
     output_path,
@@ -42,13 +43,13 @@ def convert_voice(
         config.device = "cpu"
         config.instead = "cpu"
         config.is_half = False
-    
+
     vc = VC(config)
     # Remove .pth extension if present (get_vc expects name without extension)
-    if model_name.endswith('.pth'):
+    if model_name.endswith(".pth"):
         model_name = model_name[:-4]
     vc.get_vc(model_name)
-    
+
     print(f"Converting: {input_path}")
     info, wav_opt = vc.vc_single(
         0,  # speaker ID
@@ -64,7 +65,7 @@ def convert_voice(
         rms_mix_rate,
         protect,
     )
-    
+
     if "Success" in info:
         print(f"Saving to: {output_path}")
         wavfile.write(output_path, wav_opt[0], wav_opt[1])
@@ -76,19 +77,32 @@ def convert_voice(
         print(info)
         return False
 
+
 if __name__ == "__main__":
     import argparse
+
     parser = argparse.ArgumentParser(description="Voice conversion without WebUI")
     parser.add_argument("--input", required=True, help="Input audio file path")
     parser.add_argument("--output", required=True, help="Output audio file path")
-    parser.add_argument("--model", default="kamel's voice", help="Model name (without .pth extension)")
+    parser.add_argument(
+        "--model", default="kamel's voice", help="Model name (without .pth extension)"
+    )
     parser.add_argument("--index", default=None, help="Index file path (optional)")
-    parser.add_argument("--f0method", default="pm", choices=["pm", "harvest", "rmvpe"], help="F0 extraction method")
-    parser.add_argument("--index_rate", type=float, default=0.75, help="Index rate (0.0-1.0)")
-    parser.add_argument("--f0up_key", type=int, default=0, help="Pitch shift (semitones)")
-    
+    parser.add_argument(
+        "--f0method",
+        default="pm",
+        choices=["pm", "harvest", "rmvpe"],
+        help="F0 extraction method",
+    )
+    parser.add_argument(
+        "--index_rate", type=float, default=0.75, help="Index rate (0.0-1.0)"
+    )
+    parser.add_argument(
+        "--f0up_key", type=int, default=0, help="Pitch shift (semitones)"
+    )
+
     args = parser.parse_args()
-    
+
     convert_voice(
         args.input,
         args.output,
@@ -98,4 +112,3 @@ if __name__ == "__main__":
         f0up_key=args.f0up_key,
         index_rate=args.index_rate,
     )
-

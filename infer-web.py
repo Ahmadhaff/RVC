@@ -16,8 +16,9 @@ if platform.system() == "Darwin":
     os.environ["NUMBA_NUM_THREADS"] = "1"
     # Disable multiprocessing start method that causes issues
     import multiprocessing
+
     try:
-        multiprocessing.set_start_method('spawn', force=True)
+        multiprocessing.set_start_method("spawn", force=True)
     except RuntimeError:
         pass  # Already set
 
@@ -47,14 +48,18 @@ import numpy as np
 if platform.system() == "Darwin":
     # Monkey-patch MPS to make it unavailable
     original_is_available = torch.backends.mps.is_available
+
     def mps_is_available():
         return False
+
     torch.backends.mps.is_available = mps_is_available
     # Also patch has_mps if it exists
-    if hasattr(torch.backends.mps, 'is_built'):
+    if hasattr(torch.backends.mps, "is_built"):
         original_is_built = torch.backends.mps.is_built
+
         def mps_is_built():
             return False
+
         torch.backends.mps.is_built = mps_is_built
 import gradio as gr
 import faiss
@@ -275,9 +280,14 @@ def vc_single_with_save(
             rms_mix_rate,
             protect,
         )
-        
+
         # If output directory is provided and conversion was successful, save the file
-        if opt_output_dir and opt_output_dir.strip() and "Success" in info and audio_output is not None:
+        if (
+            opt_output_dir
+            and opt_output_dir.strip()
+            and "Success" in info
+            and audio_output is not None
+        ):
             try:
                 tgt_sr, audio_opt = audio_output
                 # Check if audio data is valid (vc_single returns (None, None) on error)
@@ -286,7 +296,7 @@ def vc_single_with_save(
                 else:
                     opt_output_dir = opt_output_dir.strip().strip('"').strip("'")
                     os.makedirs(opt_output_dir, exist_ok=True)
-                    
+
                     # Get the input filename without extension
                     if input_audio_path:
                         if isinstance(input_audio_path, str):
@@ -300,15 +310,19 @@ def vc_single_with_save(
                         base_name = os.path.splitext(input_basename)[0]
                     else:
                         base_name = "converted"
-                    
+
                     # Save the file
                     if output_format in ["wav", "flac"]:
-                        output_path = os.path.join(opt_output_dir, f"{base_name}.{output_format}")
+                        output_path = os.path.join(
+                            opt_output_dir, f"{base_name}.{output_format}"
+                        )
                         sf.write(output_path, audio_opt, tgt_sr)
                         info += f"\n\nFile saved to: {output_path}"
                     else:
                         # For mp3, m4a, etc., use wav2 conversion
-                        output_path = os.path.join(opt_output_dir, f"{base_name}.{output_format}")
+                        output_path = os.path.join(
+                            opt_output_dir, f"{base_name}.{output_format}"
+                        )
                         with BytesIO() as wavf:
                             sf.write(wavf, audio_opt, tgt_sr, format="wav")
                             wavf.seek(0, 0)
@@ -318,7 +332,7 @@ def vc_single_with_save(
             except Exception as e:
                 logger.warning(f"Failed to save file: {str(e)}")
                 info += f"\n\nWarning: Failed to save file: {str(e)}"
-        
+
         # Return the audio output as-is (vc_single already returns the correct format)
         # Gradio Audio component accepts (sample_rate, numpy_array) with int16 or float arrays
         return info, audio_output
@@ -1803,7 +1817,9 @@ with gr.Blocks(title="RVC WebUI") as app:
                     logger.error(f"Error launching Gradio with queue: {e}")
                     traceback.print_exc()
                     # Last resort: try without queue (will break batch conversion)
-                    logger.warning("Falling back to launch without queue (batch conversion will not work)")
+                    logger.warning(
+                        "Falling back to launch without queue (batch conversion will not work)"
+                    )
                     app.launch(
                         server_name="0.0.0.0",
                         inbrowser=not config.noautoopen,
@@ -1814,7 +1830,9 @@ with gr.Blocks(title="RVC WebUI") as app:
                 logger.error(f"Error launching Gradio with queue: {e}")
                 traceback.print_exc()
                 # Last resort: try without queue (will break batch conversion)
-                logger.warning("Falling back to launch without queue (batch conversion will not work)")
+                logger.warning(
+                    "Falling back to launch without queue (batch conversion will not work)"
+                )
                 app.launch(
                     server_name="0.0.0.0",
                     inbrowser=not config.noautoopen,

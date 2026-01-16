@@ -176,7 +176,9 @@ class Config:
         else:
             logger.info("No supported Nvidia GPU found")
             if self.has_mps() and os.environ.get("FORCE_CPU_MODE", "0") == "1":
-                logger.info("MPS available but forcing CPU mode due to compatibility issues")
+                logger.info(
+                    "MPS available but forcing CPU mode due to compatibility issues"
+                )
             self.device = self.instead = "cpu"
             self.is_half = False
             self.use_fp32_config()

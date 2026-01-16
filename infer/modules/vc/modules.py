@@ -196,15 +196,19 @@ class VC:
                         else:
                             # Try relative to logs directory
                             potential_path = os.path.join("logs", file_index)
-                            if os.path.exists(potential_path) or os.path.islink(potential_path):
+                            if os.path.exists(potential_path) or os.path.islink(
+                                potential_path
+                            ):
                                 file_index = os.path.abspath(potential_path)
                             else:
                                 file_index = os.path.abspath(file_index)
                     else:
                         file_index = os.path.abspath(file_index)
-                    
+
                     # Resolve symlinks to get the actual file path
-                    if os.path.islink(file_index) or (os.path.exists(file_index) and os.path.islink(file_index)):
+                    if os.path.islink(file_index) or (
+                        os.path.exists(file_index) and os.path.islink(file_index)
+                    ):
                         try:
                             resolved = os.path.realpath(file_index)
                             if os.path.exists(resolved):
@@ -217,7 +221,9 @@ class VC:
                     if not os.path.isabs(file_index):
                         file_index = os.path.abspath(file_index)
                     # Resolve symlinks
-                    if os.path.islink(file_index) or (os.path.exists(file_index) and os.path.islink(file_index)):
+                    if os.path.islink(file_index) or (
+                        os.path.exists(file_index) and os.path.islink(file_index)
+                    ):
                         try:
                             resolved = os.path.realpath(file_index)
                             if os.path.exists(resolved):
@@ -265,12 +271,8 @@ class VC:
                             index_used = os.path.exists(file_index)
                     else:
                         index_used = os.path.exists(file_index)
-            
-            index_info = (
-                "Index:\n%s." % file_index
-                if index_used
-                else "Index not used."
-            )
+
+            index_info = "Index:\n%s." % file_index if index_used else "Index not used."
             return (
                 "Success.\n%s\nTime:\nnpy: %.2fs, f0: %.2fs, infer: %.2fs."
                 % (index_info, *times),
@@ -317,7 +319,8 @@ class VC:
                     elif os.path.isdir(dir_path):
                         # If it's a directory, get all files in it
                         paths = [
-                            os.path.join(dir_path, name) for name in os.listdir(dir_path)
+                            os.path.join(dir_path, name)
+                            for name in os.listdir(dir_path)
                         ]
                     else:
                         # Path doesn't exist
