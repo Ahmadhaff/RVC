@@ -98,6 +98,9 @@ class VC:
                 "",
             )
         person = f'{os.getenv("weight_root")}/{sid}'
+        # Add .pth extension if not present and file doesn't exist
+        if not os.path.exists(person) and os.path.exists(f"{person}.pth"):
+            person = f"{person}.pth"
         logger.info(f"Loading: {person}")
 
         self.cpt = torch.load(person, map_location="cpu")
@@ -160,6 +163,10 @@ class VC:
     ):
         if input_audio_path is None:
             return "You need to upload an audio", None
+        # Extract float value if protect is a dict (Gradio compatibility)
+        if isinstance(protect, dict):
+            protect = protect.get("value", 0.33) if "value" in protect else 0.33
+        protect = float(protect)
         f0_up_key = int(f0_up_key)
         try:
             audio = load_audio(input_audio_path, 16000)
@@ -180,8 +187,43 @@ class VC:
                     .strip(" ")
                     .replace("trained", "added")
                 )
+                # Convert to absolute path and resolve symlinks
+                if file_index:
+                    if not os.path.isabs(file_index):
+                        # Try relative to current directory first
+                        if os.path.exists(file_index) or os.path.islink(file_index):
+                            file_index = os.path.abspath(file_index)
+                        else:
+                            # Try relative to logs directory
+                            potential_path = os.path.join("logs", file_index)
+                            if os.path.exists(potential_path) or os.path.islink(potential_path):
+                                file_index = os.path.abspath(potential_path)
+                            else:
+                                file_index = os.path.abspath(file_index)
+                    else:
+                        file_index = os.path.abspath(file_index)
+                    
+                    # Resolve symlinks to get the actual file path
+                    if os.path.islink(file_index) or (os.path.exists(file_index) and os.path.islink(file_index)):
+                        try:
+                            resolved = os.path.realpath(file_index)
+                            if os.path.exists(resolved):
+                                file_index = resolved
+                        except:
+                            pass  # Keep original if resolution fails
             elif file_index2:
                 file_index = file_index2
+                if file_index:
+                    if not os.path.isabs(file_index):
+                        file_index = os.path.abspath(file_index)
+                    # Resolve symlinks
+                    if os.path.islink(file_index) or (os.path.exists(file_index) and os.path.islink(file_index)):
+                        try:
+                            resolved = os.path.realpath(file_index)
+                            if os.path.exists(resolved):
+                                file_index = resolved
+                        except:
+                            pass
             else:
                 file_index = ""  # 防止小白写错，自动帮他替换掉
 
@@ -209,9 +251,24 @@ class VC:
                 tgt_sr = resample_sr
             else:
                 tgt_sr = self.tgt_sr
+            # Check if index was actually used (check both symlink and resolved path)
+            index_used = False
+            if file_index:
+                # Check if file exists (handles both regular files and symlinks)
+                if os.path.exists(file_index) or os.path.islink(file_index):
+                    # For symlinks, check if the target exists
+                    if os.path.islink(file_index):
+                        try:
+                            resolved = os.path.realpath(file_index)
+                            index_used = os.path.exists(resolved)
+                        except:
+                            index_used = os.path.exists(file_index)
+                    else:
+                        index_used = os.path.exists(file_index)
+            
             index_info = (
                 "Index:\n%s." % file_index
-                if os.path.exists(file_index)
+                if index_used
                 else "Index not used."
             )
             return (
@@ -242,6 +299,10 @@ class VC:
         format1,
     ):
         try:
+            # Extract float value if protect is a dict (Gradio compatibility)
+            if isinstance(protect, dict):
+                protect = protect.get("value", 0.33) if "value" in protect else 0.33
+            protect = float(protect)
             dir_path = (
                 dir_path.strip(" ").strip('"').strip("\n").strip('"').strip(" ")
             )  # 防止小白拷路径头尾带了空格和"和回车
@@ -249,14 +310,30 @@ class VC:
             os.makedirs(opt_root, exist_ok=True)
             try:
                 if dir_path != "":
-                    paths = [
-                        os.path.join(dir_path, name) for name in os.listdir(dir_path)
-                    ]
+                    # Check if dir_path is a file or directory
+                    if os.path.isfile(dir_path):
+                        # If it's a file, treat it as a single file to convert
+                        paths = [dir_path]
+                    elif os.path.isdir(dir_path):
+                        # If it's a directory, get all files in it
+                        paths = [
+                            os.path.join(dir_path, name) for name in os.listdir(dir_path)
+                        ]
+                    else:
+                        # Path doesn't exist
+                        yield f"Error: Path '{dir_path}' does not exist."
+                        return
                 else:
                     paths = [path.name for path in paths]
-            except:
+            except Exception as e:
+                logger.warning(f"Error processing paths: {str(e)}")
                 traceback.print_exc()
-                paths = [path.name for path in paths]
+                # Fallback to uploaded files if available
+                try:
+                    paths = [path.name for path in paths]
+                except:
+                    yield f"Error: Could not process input paths. {str(e)}"
+                    return
             infos = []
             for path in paths:
                 info, opt = self.vc_single(
@@ -300,5 +377,8 @@ class VC:
                 infos.append("%s->%s" % (os.path.basename(path), info))
                 yield "\n".join(infos)
             yield "\n".join(infos)
-        except:
+        except GeneratorExit:
+            # Re-raise GeneratorExit to allow proper generator cleanup
+            raise
+        except Exception as e:
             yield traceback.format_exc()

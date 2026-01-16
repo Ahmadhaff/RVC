@@ -299,15 +299,33 @@ class Pipeline(object):
         protect,
         f0_file=None,
     ):
+        # Resolve symlinks for index file
+        index_path_to_check = file_index
+        if file_index != "":
+            # Check if it's a symlink and resolve it
+            if os.path.islink(file_index):
+                try:
+                    resolved = os.path.realpath(file_index)
+                    if os.path.exists(resolved):
+                        index_path_to_check = resolved
+                except:
+                    pass  # Keep original if resolution fails
+            # Also check if relative path needs to be made absolute
+            if not os.path.isabs(index_path_to_check) and not os.path.exists(index_path_to_check):
+                abs_path = os.path.abspath(index_path_to_check)
+                if os.path.exists(abs_path):
+                    index_path_to_check = abs_path
+        
         if (
             file_index != ""
             # and file_big_npy != ""
             # and os.path.exists(file_big_npy) == True
-            and os.path.exists(file_index)
+            and (os.path.exists(index_path_to_check) or os.path.islink(file_index))
             and index_rate != 0
         ):
             try:
-                index = faiss.read_index(file_index)
+                # Use resolved path for reading the index
+                index = faiss.read_index(index_path_to_check)
                 # big_npy = np.load(file_big_npy)
                 big_npy = index.reconstruct_n(0, index.ntotal)
             except:

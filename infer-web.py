@@ -1,5 +1,26 @@
 import os
 import sys
+import platform
+
+# Disable MPS completely to prevent segmentation faults on macOS
+# Set environment variables before importing torch
+os.environ["PYTORCH_ENABLE_MPS_FALLBACK"] = "1"
+os.environ["PYTORCH_MPS_HIGH_WATERMARK_RATIO"] = "0.0"
+# Force CPU mode to avoid MPS segmentation faults
+os.environ["FORCE_CPU_MODE"] = "1"
+# Disable multiprocessing to avoid crashes on macOS
+if platform.system() == "Darwin":
+    os.environ["OMP_NUM_THREADS"] = "1"
+    os.environ["MKL_NUM_THREADS"] = "1"
+    os.environ["NUMEXPR_NUM_THREADS"] = "1"
+    os.environ["NUMBA_NUM_THREADS"] = "1"
+    # Disable multiprocessing start method that causes issues
+    import multiprocessing
+    try:
+        multiprocessing.set_start_method('spawn', force=True)
+    except RuntimeError:
+        pass  # Already set
+
 from dotenv import load_dotenv
 
 now_dir = os.getcwd()
@@ -13,11 +34,28 @@ from infer.lib.train.process_ckpt import (
     merge,
     show_info,
 )
+from infer.lib.audio import wav2
+import soundfile as sf
+from io import BytesIO
 from i18n.i18n import I18nAuto
 from configs.config import Config
 from sklearn.cluster import MiniBatchKMeans
-import torch, platform
+import torch
 import numpy as np
+
+# Disable MPS at PyTorch level to prevent segmentation faults
+if platform.system() == "Darwin":
+    # Monkey-patch MPS to make it unavailable
+    original_is_available = torch.backends.mps.is_available
+    def mps_is_available():
+        return False
+    torch.backends.mps.is_available = mps_is_available
+    # Also patch has_mps if it exists
+    if hasattr(torch.backends.mps, 'is_built'):
+        original_is_built = torch.backends.mps.is_built
+        def mps_is_built():
+            return False
+        torch.backends.mps.is_built = mps_is_built
 import gradio as gr
 import faiss
 import fairseq
@@ -51,6 +89,13 @@ torch.manual_seed(114514)
 
 
 config = Config()
+# Force CPU mode if MPS causes segmentation faults on macOS
+# Always use CPU on macOS to avoid segmentation faults
+if config.device == "mps" or (platform.system() == "Darwin" and config.device != "cpu"):
+    config.device = "cpu"
+    config.instead = "cpu"
+    config.is_half = False  # Disable half precision on CPU
+    logger.info("Forced CPU mode due to MPS compatibility issues on macOS")
 vc = VC(config)
 
 
@@ -136,26 +181,45 @@ index_root = os.getenv("index_root")
 outside_index_root = os.getenv("outside_index_root")
 
 names = []
-for name in os.listdir(weight_root):
-    if name.endswith(".pth"):
-        names.append(name)
+try:
+    if weight_root and os.path.exists(weight_root):
+        for name in os.listdir(weight_root):
+            if name.endswith(".pth"):
+                names.append(name)
+except Exception as e:
+    logger.warning(f"Error reading weight_root: {e}")
+
 index_paths = []
 
 
 def lookup_indices(index_root):
     global index_paths
-    for root, dirs, files in os.walk(index_root, topdown=False):
-        for name in files:
-            if name.endswith(".index") and "trained" not in name:
-                index_paths.append("%s/%s" % (root, name))
+    try:
+        if index_root and os.path.exists(index_root):
+            for root, dirs, files in os.walk(index_root, topdown=False):
+                for name in files:
+                    if name.endswith(".index") and "trained" not in name:
+                        index_paths.append("%s/%s" % (root, name))
+    except Exception as e:
+        logger.warning(f"Error looking up indices in {index_root}: {e}")
 
 
-lookup_indices(index_root)
-lookup_indices(outside_index_root)
+try:
+    if index_root:
+        lookup_indices(index_root)
+    if outside_index_root:
+        lookup_indices(outside_index_root)
+except Exception as e:
+    logger.warning(f"Error during index lookup: {e}")
+
 uvr5_names = []
-for name in os.listdir(weight_uvr5_root):
-    if name.endswith(".pth") or "onnx" in name:
-        uvr5_names.append(name.replace(".pth", ""))
+try:
+    if weight_uvr5_root and os.path.exists(weight_uvr5_root):
+        for name in os.listdir(weight_uvr5_root):
+            if name.endswith(".pth") or "onnx" in name:
+                uvr5_names.append(name.replace(".pth", ""))
+except Exception as e:
+    logger.warning(f"Error reading weight_uvr5_root: {e}")
 
 
 def change_choices():
@@ -176,6 +240,92 @@ def change_choices():
 
 def clean():
     return {"value": "", "__type__": "update"}
+
+
+def vc_single_with_save(
+    sid,
+    input_audio_path,
+    vc_transform,
+    f0_file,
+    f0method,
+    file_index1,
+    file_index2,
+    index_rate,
+    filter_radius,
+    resample_sr,
+    rms_mix_rate,
+    protect,
+    opt_output_dir,
+    output_format,
+):
+    """Wrapper for vc_single that optionally saves the output file to disk."""
+    try:
+        # Call the original vc_single function
+        info, audio_output = vc.vc_single(
+            sid,
+            input_audio_path,
+            vc_transform,
+            f0_file,
+            f0method,
+            file_index1,
+            file_index2,
+            index_rate,
+            filter_radius,
+            resample_sr,
+            rms_mix_rate,
+            protect,
+        )
+        
+        # If output directory is provided and conversion was successful, save the file
+        if opt_output_dir and opt_output_dir.strip() and "Success" in info and audio_output is not None:
+            try:
+                tgt_sr, audio_opt = audio_output
+                # Check if audio data is valid (vc_single returns (None, None) on error)
+                if audio_opt is None or tgt_sr is None:
+                    logger.warning("Invalid audio output, skipping file save")
+                else:
+                    opt_output_dir = opt_output_dir.strip().strip('"').strip("'")
+                    os.makedirs(opt_output_dir, exist_ok=True)
+                    
+                    # Get the input filename without extension
+                    if input_audio_path:
+                        if isinstance(input_audio_path, str):
+                            input_basename = os.path.basename(input_audio_path)
+                        else:
+                            # Handle Gradio file object
+                            try:
+                                input_basename = os.path.basename(input_audio_path.name)
+                            except:
+                                input_basename = "converted"
+                        base_name = os.path.splitext(input_basename)[0]
+                    else:
+                        base_name = "converted"
+                    
+                    # Save the file
+                    if output_format in ["wav", "flac"]:
+                        output_path = os.path.join(opt_output_dir, f"{base_name}.{output_format}")
+                        sf.write(output_path, audio_opt, tgt_sr)
+                        info += f"\n\nFile saved to: {output_path}"
+                    else:
+                        # For mp3, m4a, etc., use wav2 conversion
+                        output_path = os.path.join(opt_output_dir, f"{base_name}.{output_format}")
+                        with BytesIO() as wavf:
+                            sf.write(wavf, audio_opt, tgt_sr, format="wav")
+                            wavf.seek(0, 0)
+                            with open(output_path, "wb") as outf:
+                                wav2(wavf, outf, output_format)
+                        info += f"\n\nFile saved to: {output_path}"
+            except Exception as e:
+                logger.warning(f"Failed to save file: {str(e)}")
+                info += f"\n\nWarning: Failed to save file: {str(e)}"
+        
+        # Return the audio output as-is (vc_single already returns the correct format)
+        # Gradio Audio component accepts (sample_rate, numpy_array) with int16 or float arrays
+        return info, audio_output
+    except Exception as e:
+        error_msg = f"Error in conversion: {str(e)}\n{traceback.format_exc()}"
+        logger.error(error_msg)
+        return error_msg, None
 
 
 def export_onnx(ModelPath, ExportedPath):
@@ -918,6 +1068,18 @@ with gr.Blocks(title="RVC WebUI") as app:
                                 value=0.75,
                                 interactive=True,
                             )
+                            opt_output_dir_single = gr.Textbox(
+                                label=i18n("输出文件夹(可选,留空则不保存到磁盘)"),
+                                value="",
+                                placeholder="opt",
+                                interactive=True,
+                            )
+                            output_format_single = gr.Radio(
+                                label=i18n("导出文件格式"),
+                                choices=["wav", "flac", "mp3", "m4a"],
+                                value="wav",
+                                interactive=True,
+                            )
                             f0_file = gr.File(
                                 label=i18n(
                                     "F0曲线文件, 可选, 一行一个音高, 代替默认F0及升降调"
@@ -946,7 +1108,7 @@ with gr.Blocks(title="RVC WebUI") as app:
                             )
 
                         but0.click(
-                            vc.vc_single,
+                            vc_single_with_save,
                             [
                                 spk_item,
                                 input_audio0,
@@ -961,6 +1123,8 @@ with gr.Blocks(title="RVC WebUI") as app:
                                 resample_sr0,
                                 rms_mix_rate0,
                                 protect0,
+                                opt_output_dir_single,
+                                output_format_single,
                             ],
                             [vc_output1, vc_output2],
                             api_name="infer_convert",
@@ -1611,9 +1775,68 @@ with gr.Blocks(title="RVC WebUI") as app:
     if config.iscolab:
         app.queue(concurrency_count=511, max_size=1022).launch(share=True)
     else:
-        app.queue(concurrency_count=511, max_size=1022).launch(
-            server_name="0.0.0.0",
-            inbrowser=not config.noautoopen,
-            server_port=config.listen_port,
-            quiet=True,
-        )
+        # On macOS, use minimal queue settings to avoid segmentation faults
+        # Queue is required for generator functions (vc_multi)
+        if platform.system() == "Darwin":
+            logger.info("Launching Gradio with minimal queue on macOS")
+            try:
+                # Use minimal queue settings with max_threads=1 to reduce crash risk
+                # max_threads=1 prevents multiprocessing which causes segfaults
+                app.queue(concurrency_count=1, max_size=1, max_threads=1).launch(
+                    server_name="0.0.0.0",
+                    inbrowser=not config.noautoopen,
+                    server_port=config.listen_port,
+                    quiet=True,
+                    share=False,
+                )
+            except TypeError:
+                # Older Gradio versions don't support max_threads
+                try:
+                    app.queue(concurrency_count=1, max_size=1).launch(
+                        server_name="0.0.0.0",
+                        inbrowser=not config.noautoopen,
+                        server_port=config.listen_port,
+                        quiet=True,
+                        share=False,
+                    )
+                except Exception as e:
+                    logger.error(f"Error launching Gradio with queue: {e}")
+                    traceback.print_exc()
+                    # Last resort: try without queue (will break batch conversion)
+                    logger.warning("Falling back to launch without queue (batch conversion will not work)")
+                    app.launch(
+                        server_name="0.0.0.0",
+                        inbrowser=not config.noautoopen,
+                        server_port=config.listen_port,
+                        quiet=True,
+                    )
+            except Exception as e:
+                logger.error(f"Error launching Gradio with queue: {e}")
+                traceback.print_exc()
+                # Last resort: try without queue (will break batch conversion)
+                logger.warning("Falling back to launch without queue (batch conversion will not work)")
+                app.launch(
+                    server_name="0.0.0.0",
+                    inbrowser=not config.noautoopen,
+                    server_port=config.listen_port,
+                    quiet=True,
+                )
+        else:
+            # Reduced queue size for other platforms
+            try:
+                app.queue(concurrency_count=1, max_size=2).launch(
+                    server_name="0.0.0.0",
+                    inbrowser=not config.noautoopen,
+                    server_port=config.listen_port,
+                    quiet=True,
+                )
+            except Exception as e:
+                logger.error(f"Error launching Gradio: {e}")
+                traceback.print_exc()
+                # Try without queue as fallback
+                app.launch(
+                    server_name="0.0.0.0",
+                    inbrowser=not config.noautoopen,
+                    server_port=config.listen_port,
+                    quiet=True,
+                )

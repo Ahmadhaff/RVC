@@ -7,10 +7,10 @@ from scipy import signal
 now_dir = os.getcwd()
 sys.path.append(now_dir)
 print(*sys.argv[1:])
-inp_root = sys.argv[1]
+inp_root = sys.argv[1].strip()  # Strip whitespace from path
 sr = int(sys.argv[2])
 n_p = int(sys.argv[3])
-exp_dir = sys.argv[4]
+exp_dir = sys.argv[4].strip()  # Strip whitespace from experiment directory
 noparallel = sys.argv[5] == "True"
 per = float(sys.argv[6])
 import os
@@ -110,6 +110,11 @@ class PreProcess:
 
     def pipeline_mp_inp_dir(self, inp_root, n_p):
         try:
+            # Strip whitespace and ensure path exists
+            inp_root = inp_root.strip()
+            if not os.path.exists(inp_root):
+                println(f"Error: Input directory does not exist: {inp_root}")
+                return
             infos = [
                 ("%s/%s" % (inp_root, name), idx)
                 for idx, name in enumerate(sorted(list(os.listdir(inp_root))))

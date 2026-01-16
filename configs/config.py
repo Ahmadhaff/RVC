@@ -110,6 +110,9 @@ class Config:
     # check `getattr` and try it for compatibility
     @staticmethod
     def has_mps() -> bool:
+        # Force disable MPS if FORCE_CPU_MODE is set
+        if os.environ.get("FORCE_CPU_MODE", "0") == "1":
+            return False
         if not torch.backends.mps.is_available():
             return False
         try:
@@ -165,13 +168,15 @@ class Config:
             )
             if self.gpu_mem <= 4:
                 self.preprocess_per = 3.0
-        elif self.has_mps():
+        elif self.has_mps() and os.environ.get("FORCE_CPU_MODE", "0") != "1":
             logger.info("No supported Nvidia GPU found")
             self.device = self.instead = "mps"
             self.is_half = False
             self.use_fp32_config()
         else:
             logger.info("No supported Nvidia GPU found")
+            if self.has_mps() and os.environ.get("FORCE_CPU_MODE", "0") == "1":
+                logger.info("MPS available but forcing CPU mode due to compatibility issues")
             self.device = self.instead = "cpu"
             self.is_half = False
             self.use_fp32_config()
